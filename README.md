@@ -91,3 +91,14 @@ sudo bash setup_router.sh
 
 Consulte `router/README.md` para os requisitos de interface, a configuração da
 rede e os testes de funcionamento.
+
+## Teste direto do DHT22
+
+Para testar o sensor sem Wi-Fi ou servidor, abra:
+
+```text
+esp32_dht22_sensor_test/esp32_dht22_sensor_test.ino
+```
+
+Consulte `esp32_dht22_sensor_test/README.md` para conexão, bibliotecas e uso
+no Monitor Serial da IDE do Arduino.
