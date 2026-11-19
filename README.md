@@ -61,3 +61,33 @@ Configure o mesmo valor em `API_KEY` nos dois códigos Arduino.
 7. Conecte o DHT22: VCC -> 3V3, GND -> GND e DATA -> GPIO 4.
 
 Não use a porta 5V do ESP32 para alimentar o DHT22 caso a fonte do projeto seja limitada.
+
+## Estrutura atual do projeto
+
+```text
+raspberry_sensor_server/
+  server.py
+  install.sh
+  esp32_dht22/
+    esp32_dht22.ino
+router/
+  setup_router.sh
+  README.md
+```
+
+## Raspberry Pi como roteador
+
+O projeto também inclui um instalador que transforma o Raspberry Pi em ponto de
+acesso Wi-Fi para os ESP32, com DHCP e compartilhamento da Internet pela
+conexão Ethernet.
+
+Execute no Raspberry Pi:
+
+```bash
+cd raspberry_sensor_server/..
+cd router
+sudo bash setup_router.sh
+```
+
+Consulte `router/README.md` para os requisitos de interface, a configuração da
+rede e os testes de funcionamento.
