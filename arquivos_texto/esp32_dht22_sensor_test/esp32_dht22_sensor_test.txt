@@ -1,63 +1,84 @@
-#include <Arduino.h>
-#include <DHT.h>
-#include <math.h>
+EXPLICACAO LINHA POR LINHA: esp32_dht22_sensor_test.ino
 
-#define DHT_PIN 4
-#define DHT_TYPE DHT22
+Este sketch testa o DHT22 ligado ao ESP32 sem depender da rede ou do servidor.
+Ele exibe no monitor serial temperatura, umidade e ponto de orvalho. E
+importante para verificar primeiro a ligacao eletrica e o funcionamento do
+sensor isoladamente.
 
-DHT dht(DHT_PIN, DHT_TYPE);
+As referencias usam os numeros de linha do sketch original. Todas as linhas
+com codigo estao explicadas. Linhas em branco apenas organizam o codigo.
 
-const unsigned long READ_INTERVAL_MS = 2000;
+LINHAS 1-12 - BIBLIOTECAS E CONFIGURACAO
+1: Importa recursos basicos da plataforma Arduino.
+2: Importa a biblioteca de leitura do sensor DHT.
+3: Importa funcoes matematicas, incluindo log, usadas no calculo do ponto de
+   orvalho.
+4: Linha em branco para separar as bibliotecas.
+5: Define GPIO 4 como pino de dados do sensor.
+6: Define o modelo do dispositivo como DHT22.
+7: Linha em branco de separacao.
+8: Cria o objeto da biblioteca para controlar o sensor com essas configuracoes.
+9: Linha em branco de separacao.
+10: Define o intervalo de leitura como 2000 milissegundos, ou dois segundos.
+11: Linha em branco de separacao.
+12: Declara antecipadamente a funcao que calculara o ponto de orvalho; permite
+    que setup e loop a utilizem antes da implementacao no fim do arquivo.
 
-float calculateDewPoint(float temperatureC, float humidityPercent);
+LINHAS 14-27 - INICIALIZACAO
+14: Declara setup, executado uma vez quando o ESP32 inicia.
+15: Inicia a comunicacao serial a 115200 baud para apresentar diagnosticos.
+16: Aguarda 1,5 segundo para dar tempo de abrir o monitor serial.
+17: Linha em branco de separacao.
+18: Imprime uma linha vazia para separar mensagens anteriores.
+19: Imprime uma borda visual no monitor.
+20: Identifica o objetivo do programa como teste independente do DHT22.
+21: Mostra a placa e o numero GPIO usado pelo sensor.
+22: Imprime a borda inferior do titulo.
+23: Linha em branco de separacao.
+24: Inicializa a biblioteca do sensor.
+25: Informa que a inicializacao do sensor foi executada.
+26: Avisa que o programa aguarda a primeira leitura.
+27: Fecha setup.
 
-void setup() {
-  Serial.begin(115200);
-  delay(1500);
+LINHAS 29-52 - LEITURA PERIODICA E DIAGNOSTICO
+29: Declara loop, executado repetidamente pela placa.
+30: Le a umidade percentual.
+31: Le a temperatura em Celsius.
+32: Linha em branco de separacao.
+33: Detecta falha quando uma das leituras nao for um numero valido.
+34: Imprime uma mensagem de erro de leitura.
+35: Sugere verificar alimentacao, terra e pino de dados, ajudando a localizar
+    problemas de montagem.
+36: Se as leituras forem validas, inicia o bloco de resultados.
+37: Le tambem a temperatura em Fahrenheit.
+38: Linha em branco de separacao.
+39: Imprime um separador para distinguir uma rodada de leitura da anterior.
+40: Exibe a umidade com duas casas decimais.
+41: Exibe a temperatura em Celsius com duas casas decimais.
+42: Linha em branco de separacao.
+43: Confere se a leitura Fahrenheit e valida.
+44: Exibe Fahrenheit somente quando a conversao/leitura foi bem-sucedida.
+45: Fecha a verificacao de Fahrenheit.
+46: Linha em branco de separacao.
+47: Inicia a mensagem com o ponto de orvalho aproximado.
+48: Passa temperatura e umidade para a funcao de calculo e imprime o resultado.
+49: Fecha o bloco de leituras validas.
+50: Linha em branco de separacao.
+51: Aguarda dois segundos antes da proxima leitura, respeitando o intervalo
+    minimo pratico do DHT22 e evitando consultas excessivas.
+52: Fecha loop.
 
-  Serial.println();
-  Serial.println("========================================");
-  Serial.println("Teste independente do sensor DHT22");
-  Serial.printf("Placa: ESP32 | Pino de dados: GPIO %d\n", DHT_PIN);
-  Serial.println("========================================");
-
-  dht.begin();
-  Serial.println("Sensor inicializado.");
-  Serial.println("Aguardando primeira leitura...");
-}
-
-void loop() {
-  float humidity = dht.readHumidity();
-  float temperatureC = dht.readTemperature();
-
-  if (isnan(humidity) || isnan(temperatureC)) {
-    Serial.println("[ERRO] Falha na leitura do DHT22.");
-    Serial.println("[VERIFIQUE] VCC=3V3, GND=GND, DATA=GPIO 4.");
-  } else {
-    float temperatureF = dht.readTemperature(true);
-
-    Serial.println("----------------------------------------");
-    Serial.printf("[OK] Umidade: %.2f %%\n", humidity);
-    Serial.printf("[OK] Temperatura: %.2f C\n", temperatureC);
-
-    if (!isnan(temperatureF)) {
-      Serial.printf("[OK] Temperatura: %.2f F\n", temperatureF);
-    }
-
-    Serial.printf("[INFO] Ponto de orvalho aproximado: %.2f C\n",
-                  calculateDewPoint(temperatureC, humidity));
-  }
-
-  delay(READ_INTERVAL_MS);
-}
-
-float calculateDewPoint(float temperatureC, float humidityPercent) {
-  const float A = 17.27;
-  const float B = 237.7;
-
-  float alpha =
-    (A * temperatureC) / (B + temperatureC) +
-    log(humidityPercent / 100.0);
-
-  return (B * alpha) / (A - alpha);
-}
+LINHAS 54-63 - CALCULO DO PONTO DE ORVALHO
+54: Implementa a funcao anunciada na linha 12; recebe temperatura Celsius e
+    umidade percentual.
+55: Define a constante A da aproximacao de Magnus usada para estimar o ponto
+    de orvalho.
+56: Define a constante B da mesma formula, em graus Celsius.
+57: Linha em branco de separacao.
+58: Comeca o calculo do parametro intermediario alpha.
+59: Calcula a parcela de alpha que depende da temperatura.
+60: Soma o logaritmo da umidade convertida de porcentagem para fracao.
+61: Linha em branco de separacao.
+62: Aplica a formula de Magnus inversa para obter o ponto de orvalho aproximado
+    em Celsius e devolve o resultado.
+63: Fecha a funcao de calculo.

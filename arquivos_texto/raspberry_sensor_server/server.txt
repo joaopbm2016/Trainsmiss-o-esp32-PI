@@ -1,223 +1,258 @@
-#!/usr/bin/env python3
+EXPLICACAO LINHA POR LINHA: raspberry_sensor_server/server.py
 
-import json
-import os
-import sqlite3
-from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+Este arquivo inicia um servidor HTTP no Raspberry Pi, recebe leituras de
+temperatura e umidade dos ESP32, guarda os dados em SQLite e oferece uma pagina
+web para consulta. A importancia dele e centralizar e disponibilizar as
+medicoes.
 
+As referencias abaixo usam os numeros de linha do arquivo Python original.
+Todas as linhas com codigo estao explicadas. Linhas em branco servem apenas
+para organizar o codigo e nao alteram sua execucao.
 
-HOST = "0.0.0.0"
-PORT = int(os.getenv("PORT", "8080"))
-DB_FILE = Path(os.getenv("DB_FILE", str(Path(__file__).parent / "readings.db")))
-API_KEY = os.getenv("SENSOR_API_KEY", "").strip()
+LINHAS 1-15 - INTERPRETADOR, IMPORTACOES E CONFIGURACAO
+1: Indica que o sistema deve executar o arquivo com Python 3; permite iniciar
+   o programa diretamente em sistemas que reconhecem essa linha.
+2: Linha em branco para separar o interpretador das importacoes.
+3: Importa json para converter dados entre objetos Python e JSON; necessario
+   para a API receber e responder dados.
+4: Importa os para ler configuracoes definidas em variaveis de ambiente.
+5: Importa sqlite3 para armazenar as leituras em um banco local.
+6: Importa datetime e timezone para gerar horarios com fuso horario explicito.
+7: Importa as classes do servidor HTTP: uma atende requisicoes e a outra
+   aceita conexoes simultaneas.
+8: Importa Path para montar caminhos de arquivos de forma confiavel.
+9: Importa funcoes para separar o caminho e os parametros de uma URL.
+10-11: Linhas em branco que separam as importacoes da configuracao.
+12: Define o servidor para escutar em todas as interfaces de rede; assim o
+    ESP32 pode acessa-lo pela rede.
+13: Define a porta HTTP; a variavel PORT pode substitui-la, e 8080 e o padrao.
+14: Define o caminho do banco; DB_FILE pode muda-lo, e o padrao e readings.db
+    na mesma pasta deste programa.
+15: Le a chave opcional SENSOR_API_KEY e remove espacos nas extremidades;
+    quando preenchida, protege o envio de novas leituras.
 
+LINHAS 16-45 - HORARIO E BANCO DE DADOS
+16-17: Linhas em branco que separam a configuracao das funcoes.
+18: Declara a funcao que fornece o horario atual em UTC.
+19: Retorna a data e hora em formato ISO, com precisao de segundos e sufixo Z;
+    um formato uniforme facilita comparar leituras de dispositivos diferentes.
+20-21: Linhas em branco de separacao.
+22: Declara a funcao que abre uma conexao com o banco.
+23: Abre o arquivo SQLite configurado e espera ate 10 segundos por um bloqueio;
+    isso permite persistir os dados sem instalar um servidor de banco separado.
+24: Configura as linhas consultadas para poderem ser acessadas pelo nome da
+    coluna, o que torna a montagem das respostas mais clara.
+25: Devolve a conexao para as funcoes que precisam consultar ou gravar dados.
+26-27: Linhas em branco de separacao.
+28: Declara a inicializacao do esquema do banco.
+29: Abre a conexao como gerenciador de contexto, que confirma transacoes bem
+    sucedidas e fecha a conexao ao sair do bloco.
+30: Comeca a executar um comando SQL de criacao da tabela.
+31: Abre a string SQL multilinha.
+32: Cria a tabela readings somente se ela ainda nao existir; evita apagar dados
+    ao reiniciar o servidor.
+33: Cria id numerico unico e automatico para cada leitura.
+34: Armazena o identificador do sensor e impede que fique vazio no banco.
+35: Reserva a coluna para o horario informado pelo sensor.
+36: Reserva a coluna numerica para temperatura em graus Celsius.
+37: Reserva a coluna numerica para umidade em porcentagem.
+38: Reserva a coluna obrigatoria para o horario em que o servidor recebeu o
+    dado, permitindo comparar com o horario informado pelo sensor.
+39: Fecha a definicao das colunas da tabela.
+40: Fecha a string SQL multilinha.
+41: Fecha a chamada que cria a tabela.
+42: Inicia a criacao de um indice para pesquisas.
+43: Cria, se necessario, um indice por sensor_id; isso agiliza consultas de
+    leituras filtradas por dispositivo.
+44: Fecha a chamada de criacao do indice.
+45: Linha em branco que separa o banco do manipulador HTTP.
 
-def utc_now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+LINHAS 47-69 - RESPOSTAS HTTP, CORS E AUTORIZACAO
+47: Declara a classe que implementa o comportamento das requisicoes HTTP.
+48: Define o nome e a versao que identificam o servidor em respostas HTTP.
+49: Linha em branco de separacao.
+50: Declara um metodo reutilizavel para enviar respostas JSON.
+51: Serializa o conteudo preservando caracteres Unicode e codifica em UTF-8.
+52: Envia o codigo HTTP da resposta, como 200 ou 400.
+53: Informa ao cliente que o corpo da resposta e JSON codificado em UTF-8.
+54: Informa o tamanho do corpo, requisito util para clientes HTTP.
+55: Permite requisicoes de navegadores de outras origens; e util para a pagina
+    web, mas significa que o endpoint pode ser acessado por qualquer origem.
+56: Finaliza os cabecalhos HTTP.
+57: Escreve o corpo JSON na conexao.
+58: Linha em branco de separacao.
+59: Trata requisicoes OPTIONS, usadas por navegadores para verificar permissoes.
+60: Responde 204, indicando que a verificacao nao precisa de corpo.
+61: Permite a verificacao CORS a partir de qualquer origem.
+62: Informa que os cabecalhos Content-Type e X-API-Key podem ser enviados.
+63: Informa que GET, POST e OPTIONS sao metodos permitidos.
+64: Finaliza os cabecalhos dessa resposta.
+65: Linha em branco de separacao.
+66: Declara a verificacao da chave da API.
+67: Verifica se nenhuma chave foi configurada.
+68: Se nao ha chave configurada, permite a requisicao; isso e pratico para teste,
+    mas nao exige autenticacao.
+69: Se ha chave, compara o cabecalho X-API-Key recebido com o valor configurado.
 
+LINHAS 71-110 - CONSULTAS GET
+71: Declara o tratamento de requisicoes GET.
+72: Separa o caminho e a consulta da URL recebida.
+73: Linha em branco de separacao.
+74: Verifica se o caminho solicitado e /health.
+75: Devolve status e horario atuais; permite verificar rapidamente se o servidor
+    esta respondendo.
+76: Encerra o tratamento dessa rota para nao continuar verificando outras.
+77: Linha em branco de separacao.
+78: Verifica se a rota solicitada e /readings.
+79: Converte os parametros da URL em uma estrutura consultavel.
+80: Obtem o primeiro sensor_id enviado; se ausente, deixa a busca sem filtro.
+81: Inicia o tratamento de um limite invalido na consulta.
+82: Le o limite pedido, usa 100 como padrao e restringe o valor entre 1 e 1000;
+    isso evita consultas vazias ou excessivamente grandes.
+83: Captura erro quando o limite nao pode ser convertido para numero.
+84: Usa 100 como limite seguro em caso de valor invalido.
+85: Encerra o tratamento do erro.
+86: Abre o banco para consultar as leituras.
+87: Verifica se foi pedido um sensor especifico.
+88: Inicia a consulta SQL filtrada por sensor.
+89: Filtra os resultados pelo sensor_id usando parametro SQL.
+90: Ordena do mais recente para o mais antigo e limita o total retornado.
+91: Passa o identificador e o limite separadamente; evita inserir valores da URL
+    diretamente no comando SQL.
+92: Executa e coleta os resultados da consulta.
+93: Caso nao haja filtro por sensor, executa a alternativa geral.
+94: Inicia a consulta de todas as leituras.
+95: Ordena por id decrescente e aplica o limite solicitado.
+96: Executa e coleta as linhas retornadas.
+97: Linha em branco de separacao.
+98: Converte as linhas em dicionarios e envia-as dentro da propriedade readings.
+99: Encerra a rota /readings.
+100: Linha em branco de separacao.
+101: Reconhece a pagina inicial e o caminho alternativo /index.html.
+102: Codifica o HTML do painel em UTF-8.
+103: Envia status HTTP 200 para indicar sucesso.
+104: Informa que a resposta e uma pagina HTML em UTF-8.
+105: Informa o tamanho do HTML.
+106: Finaliza os cabecalhos da resposta.
+107: Envia a pagina HTML ao navegador.
+108: Encerra o tratamento da pagina inicial.
+109: Linha em branco de separacao.
+110: Para qualquer outro caminho GET, responde 404 com identificacao do erro.
 
-def connect_db():
-    connection = sqlite3.connect(DB_FILE, timeout=10)
-    connection.row_factory = sqlite3.Row
-    return connection
+LINHAS 112-178 - RECEBIMENTO E VALIDACAO POST
+112: Declara o tratamento de requisicoes POST, usadas para enviar novas leituras.
+113: Confere se a requisicao foi enviada para /readings.
+114: Responde 404 se o caminho nao for o endpoint de gravacao.
+115: Encerra a requisicao com caminho invalido.
+116: Verifica a chave da API antes de aceitar dados.
+117: Responde 401 se a chave estiver incorreta.
+118: Encerra a requisicao nao autorizada.
+119: Linha em branco de separacao.
+120: Inicia o bloco de leitura e validacao do corpo HTTP.
+121: Le o tamanho do corpo indicado no cabecalho Content-Length.
+122: Rejeita corpo vazio ou maior que 65536 bytes para evitar entradas invalidas
+    ou excessivamente grandes.
+123: Gera erro para encaminhar tamanho invalido ao tratamento abaixo.
+124: Le exatamente o numero de bytes informado e interpreta o JSON.
+125: Captura erros de tamanho ou de sintaxe JSON.
+126: Responde 400 quando o corpo nao e JSON valido.
+127: Encerra a requisicao invalida.
+128: Linha em branco de separacao.
+129: Extrai o identificador do sensor do JSON.
+130: Extrai a temperatura em Celsius.
+131: Extrai a umidade percentual.
+132: Linha em branco de separacao.
+133: Exige sensor_id como texto nao vazio.
+134: Informa que o identificador do sensor e obrigatorio.
+135: Encerra o processamento se o identificador estiver ausente ou invalido.
+136: Exige que temperatura e umidade sejam valores numericos.
+137: Informa quais campos numericos estao faltando ou invalidos.
+138: Encerra o processamento se esses valores nao forem numeros.
+139: Limita a temperatura ao intervalo plausivel de -100 a 150 graus Celsius.
+140: Informa erro se a temperatura estiver fora da faixa.
+141: Encerra o processamento com temperatura invalida.
+142: Exige umidade entre 0 e 100 por cento.
+143: Informa erro se a umidade estiver fora da faixa.
+144: Encerra o processamento com umidade invalida.
+145: Linha em branco de separacao.
+146: Obtem o horario informado no JSON.
+147: Confere se o horario enviado e texto.
+148: Usa o horario atual do servidor se o sensor nao enviou texto.
+149: Linha em branco de separacao.
+150: Abre uma transacao no banco para gravar a leitura.
+151: Inicia o comando SQL de insercao.
+152: Abre a string SQL multilinha.
+153: Indica a tabela em que a nova leitura sera inserida.
+154: Lista as colunas preenchidas.
+155: Usa parametros para os cinco valores, sem interpolar dados no SQL.
+156: Fecha a string SQL.
+157: Inicia os valores correspondentes aos parametros.
+158: Remove espacos do identificador e limita seu tamanho a 50 caracteres.
+159: Limita o horario enviado a 100 caracteres.
+160: Converte a temperatura para numero decimal.
+161: Converte a umidade para numero decimal.
+162: Registra o horario de recebimento gerado pelo servidor.
+163: Fecha a lista de valores.
+164: Executa a insercao parametrizada.
+165: Guarda o id gerado para incluir na resposta ao ESP32.
+166: Fecha a conexao/transacao do banco.
+167: Inicia a resposta de sucesso.
+168: Usa status HTTP 201 para indicar que uma leitura foi criada.
+169: Abre o objeto JSON de resposta.
+170: Retorna o identificador criado no banco.
+171: Retorna o identificador do sensor informado.
+172: Retorna o horario atual do servidor.
+173: Fecha o objeto JSON.
+174: Envia a resposta de sucesso.
+175: Fecha a chamada de envio.
+176: Sobrescreve o registro padrao de requisicoes HTTP.
+177: Imprime horario, endereco do cliente e informacao da requisicao; ajuda a
+    diagnosticar acessos e erros no terminal.
+178: Fecha a definicao da classe Handler.
 
+LINHAS 180-216 - PAINEL WEB INCORPORADO
+180: Inicia uma string multilinha que contem o documento HTML do painel.
+181: Declara o idioma da pagina como portugues do Brasil.
+182: Abre a secao de metadados HTML.
+183: Define codificacao UTF-8 para exibir corretamente caracteres acentuados.
+184: Ajusta a escala da pagina para telas de celular e outros dispositivos.
+185: Define o titulo exibido na aba do navegador.
+186: Abre as regras CSS.
+187: Estiliza o corpo, limita a largura e centraliza o conteudo.
+188: Remove espacamentos entre celulas da tabela e ocupa a largura disponivel.
+189: Adiciona separadores, espacamento interno e alinhamento nas celulas.
+190: Define fundo distinto para os cabecalhos da tabela.
+191: Fecha o CSS.
+192: Fecha a secao head.
+193: Abre o corpo visivel da pagina.
+194: Mostra o titulo principal do painel.
+195: Cria o texto de status inicial, que sera atualizado pelo JavaScript.
+196: Abre a tabela de leituras.
+197: Define colunas para id, sensor, temperatura, umidade e recebimento.
+198: Cria o corpo da tabela; o JavaScript preenche este elemento.
+199: Fecha a tabela.
+200: Abre o codigo JavaScript executado no navegador.
+201: Declara a funcao assincrona que busca e apresenta leituras.
+202: Solicita ao servidor as 100 leituras mais recentes.
+203: Aguarda e interpreta a resposta como JSON.
+204: Seleciona o corpo da tabela e inicia a conversao dos registros em linhas.
+205: Adiciona id, sensor e comeca a celula de temperatura de cada registro.
+206: Formata temperatura e umidade com uma casa decimal e monta as celulas.
+207: Adiciona o horario de recebimento e fecha o conteudo da linha.
+208: Junta todas as linhas em uma unica string HTML.
+209: Atualiza o status com o horario local em que a pagina foi atualizada.
+210: Fecha a funcao update.
+211: Executa a primeira atualizacao assim que a pagina carrega.
+212: Repete a atualizacao a cada 10 segundos para manter os dados recentes.
+213: Fecha o codigo JavaScript.
+214: Fecha o corpo HTML.
+215: Fecha o documento HTML.
+216: Fecha a string Python que guarda o painel.
 
-def init_db():
-    with connect_db() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS readings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sensor_id TEXT NOT NULL,
-                sensor_timestamp TEXT,
-                temperature_c REAL,
-                humidity_percent REAL,
-                received_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_readings_sensor ON readings(sensor_id)"
-        )
-
-
-class Handler(BaseHTTPRequestHandler):
-    server_version = "RaspberrySensorServer/1.0"
-
-    def send_json(self, status, payload):
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.end_headers()
-
-    def authorized(self):
-        if not API_KEY:
-            return True
-        return self.headers.get("X-API-Key") == API_KEY
-
-    def do_GET(self):
-        parsed = urlparse(self.path)
-
-        if parsed.path == "/health":
-            self.send_json(200, {"status": "ok", "time": utc_now()})
-            return
-
-        if parsed.path == "/readings":
-            params = parse_qs(parsed.query)
-            sensor_id = params.get("sensor_id", [None])[0]
-            try:
-                limit = min(max(int(params.get("limit", ["100"])[0]), 1), 1000)
-            except ValueError:
-                limit = 100
-
-            with connect_db() as connection:
-                if sensor_id:
-                    rows = connection.execute(
-                        "SELECT * FROM readings WHERE sensor_id=? "
-                        "ORDER BY id DESC LIMIT ?",
-                        (sensor_id, limit),
-                    ).fetchall()
-                else:
-                    rows = connection.execute(
-                        "SELECT * FROM readings ORDER BY id DESC LIMIT ?", (limit,)
-                    ).fetchall()
-
-            self.send_json(200, {"readings": [dict(row) for row in rows]})
-            return
-
-        if parsed.path == "/" or parsed.path == "/index.html":
-            html = DASHBOARD.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html)))
-            self.end_headers()
-            self.wfile.write(html)
-            return
-
-        self.send_json(404, {"error": "endpoint_not_found"})
-
-    def do_POST(self):
-        if urlparse(self.path).path != "/readings":
-            self.send_json(404, {"error": "endpoint_not_found"})
-            return
-        if not self.authorized():
-            self.send_json(401, {"error": "invalid_api_key"})
-            return
-
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 65536:
-                raise ValueError("invalid_content_length")
-            payload = json.loads(self.rfile.read(length))
-        except (ValueError, json.JSONDecodeError):
-            self.send_json(400, {"error": "invalid_json"})
-            return
-
-        sensor_id = payload.get("sensor_id")
-        temperature = payload.get("temperature_c")
-        humidity = payload.get("humidity_percent")
-
-        if not isinstance(sensor_id, str) or not sensor_id.strip():
-            self.send_json(400, {"error": "sensor_id_required"})
-            return
-        if not isinstance(temperature, (int, float)) or not isinstance(humidity, (int, float)):
-            self.send_json(400, {"error": "temperature_c_and_humidity_percent_required"})
-            return
-        if not (-100 <= float(temperature) <= 150):
-            self.send_json(400, {"error": "temperature_c_out_of_range"})
-            return
-        if not (0 <= float(humidity) <= 100):
-            self.send_json(400, {"error": "humidity_percent_out_of_range"})
-            return
-
-        sensor_timestamp = payload.get("timestamp")
-        if not isinstance(sensor_timestamp, str):
-            sensor_timestamp = utc_now()
-
-        with connect_db() as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO readings
-                (sensor_id, sensor_timestamp, temperature_c, humidity_percent, received_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    sensor_id.strip()[:50],
-                    sensor_timestamp[:100],
-                    float(temperature),
-                    float(humidity),
-                    utc_now(),
-                ),
-            )
-            reading_id = cursor.lastrowid
-
-        self.send_json(
-            201,
-            {
-                "id": reading_id,
-                "sensor_id": sensor_id.strip(),
-                "received_at": utc_now(),
-            },
-        )
-
-    def log_message(self, fmt, *args):
-        print(f"{utc_now()} {self.client_address[0]} {fmt % args}")
-
-
-DASHBOARD = """<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Leituras dos sensores</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border-bottom: 1px solid #ddd; padding: .7rem; text-align: left; }
-    th { background: #f5f5f5; }
-  </style>
-</head>
-<body>
-  <h1>Leituras dos sensores</h1>
-  <p id="status">Atualizando...</p>
-  <table>
-    <thead><tr><th>ID</th><th>Sensor</th><th>Temperatura</th><th>Umidade</th><th>Recebido</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <script>
-    async function update() {
-      const response = await fetch('/readings?limit=100');
-      const data = await response.json();
-      document.querySelector('#rows').innerHTML = data.readings.map(r =>
-        '<tr><td>' + r.id + '</td><td>' + r.sensor_id + '</td><td>' +
-        r.temperature_c.toFixed(1) + ' C</td><td>' + r.humidity_percent.toFixed(1) +
-        '%</td><td>' + r.received_at + '</td></tr>'
-      ).join('');
-      document.querySelector('#status').textContent = 'Atualizado em ' + new Date().toLocaleString();
-    }
-    update();
-    setInterval(update, 10000);
-  </script>
-</body>
-</html>
-"""
-
-
-if __name__ == "__main__":
-    init_db()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Servidor iniciado em http://0.0.0.0:{PORT}")
-    server.serve_forever()
+LINHAS 217-223 - INICIALIZACAO DO SERVIDOR
+217-218: Linhas em branco de separacao.
+219: Confere se este arquivo foi executado diretamente, em vez de importado.
+220: Cria a tabela e o indice antes de atender requisicoes.
+221: Cria o servidor HTTP com suporte a conexoes simultaneas e associa Handler.
+222: Exibe no terminal o endereco e a porta de inicializacao.
+223: Mantem o servidor atendendo requisicoes continuamente.

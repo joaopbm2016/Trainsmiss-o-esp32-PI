@@ -1,110 +1,129 @@
-#include <Arduino.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <DHT.h>
-#include <time.h>
+EXPLICACAO LINHA POR LINHA: esp32_dht22.ino
 
-const char *WIFI_SSID = "SEU_WIFI";
-const char *WIFI_PASSWORD = "SUA_SENHA";
-const char *SERVER_HOST = "192.168.1.100";
-const uint16_t SERVER_PORT = 8080;
-const char *SENSOR_ID = "esp32-1"; // Use esp32-2 no segundo dispositivo
-const char *API_KEY = ""; // Igual a SENSOR_API_KEY no Raspberry Pi
+Este programa roda no ESP32 conectado ao DHT22. Ele le temperatura e umidade,
+adiciona um horario e envia cada leitura ao servidor HTTP do Raspberry Pi. Sua
+importancia e fazer a ponte entre o sensor fisico e o banco de dados.
 
-#define DHT_PIN 4
-#define DHT_TYPE DHT22
+As referencias usam os numeros de linha do sketch original. Todas as linhas
+com codigo estao explicadas. Linhas em branco apenas organizam o codigo.
 
-DHT dht(DHT_PIN, DHT_TYPE);
-const unsigned long SEND_INTERVAL_MS = 30000;
+LINHAS 1-18 - BIBLIOTECAS E CONFIGURACAO
+1: Importa recursos basicos da plataforma Arduino.
+2: Importa funcoes de Wi-Fi do ESP32 para conectar a rede.
+3: Importa o cliente HTTP usado para enviar requisicoes ao Raspberry.
+4: Importa o suporte ao sensor DHT.
+5: Importa funcoes de horario e data.
+6: Linha em branco para separar bibliotecas das configuracoes.
+7: Define o nome da rede Wi-Fi; substitua SEU_WIFI pelo SSID real.
+8: Define a senha da rede; substitua SUA_SENHA antes de compilar.
+9: Define o endereco IP do Raspberry Pi; deve corresponder a rede usada.
+10: Define a porta HTTP do servidor; 8080 e o padrao do servidor Python.
+11: Define um identificador unico para este dispositivo; outro ESP32 deve usar
+    outro identificador para distinguir suas leituras.
+12: Define a chave opcional da API; se o servidor exigir SENSOR_API_KEY, use
+    aqui o mesmo valor.
+13: Linha em branco de separacao.
+14: Define GPIO 4 como pino de dados do DHT22.
+15: Informa a biblioteca que o modelo do sensor e DHT22.
+16: Linha em branco de separacao.
+17: Cria o objeto que controla o sensor com o pino e modelo definidos.
+18: Define o intervalo de envio em 30.000 milissegundos, ou 30 segundos.
 
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+LINHAS 20-32 - CONEXAO WI-FI
+20: Declara a funcao que conecta o ESP32 a rede.
+21: Configura o Wi-Fi como estacao, ou seja, cliente de um ponto de acesso.
+22: Inicia a conexao usando SSID e senha configurados.
+23: Linha em branco de separacao.
+24: Exibe no monitor serial que a conexao esta em andamento.
+25: Repete enquanto o ESP32 ainda nao estiver conectado.
+26: Aguarda meio segundo entre verificacoes para nao consultar continuamente.
+27: Imprime um ponto para mostrar progresso no monitor serial.
+28: Fecha o loop de espera; quando conectado, o programa continua.
+29: Quebra a linha de saida do monitor serial.
+30: Escreve um rotulo para o endereco IP atribuido ao ESP32.
+31: Mostra o IP local, util para diagnostico da rede.
+32: Fecha a funcao de conexao.
 
-  Serial.print("Conectando ao Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-  Serial.print("IP do ESP32: ");
-  Serial.println(WiFi.localIP());
-}
+LINHAS 34-46 - FORMATO DE DATA E HORA
+34: Declara uma funcao que devolve o horario em texto ISO.
+35: Reserva uma estrutura para armazenar os componentes do horario.
+36: Tenta obter o horario local e espera no maximo um segundo.
+37: Se a consulta falhar, obtem o horario de sistema atual como alternativa.
+38: Cria um buffer de 25 caracteres para o horario formatado.
+39: Formata o horario como ano-mes-dia e hora UTC, terminando em Z.
+40: Devolve o buffer como String; isso permite continuar mesmo se a consulta
+    principal do horario nao estiver pronta.
+41: Fecha o bloco alternativo.
+42: Linha em branco de separacao.
+43: Cria o buffer usado quando a consulta do horario foi bem-sucedida.
+44: Formata a estrutura de horario no mesmo padrao ISO UTC.
+45: Devolve o horario formatado.
+46: Fecha a funcao de horario.
 
-String isoTimestamp() {
-  struct tm timeInfo;
-  if (!getLocalTime(&timeInfo, 1000)) {
-    time_t now = time(nullptr);
-    char buffer[25];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
-    return String(buffer);
-  }
+LINHAS 48-55 - INICIALIZACAO
+48: Declara setup, executado uma vez quando a placa inicia.
+49: Inicia a comunicacao serial a 115200 baud para mensagens de diagnostico.
+50: Inicializa o sensor DHT22.
+51: Conecta a rede Wi-Fi antes de tentar enviar dados.
+52: Linha em branco de separacao.
+53: Configura o fuso UTC e servidores NTP que fornecem o horario.
+54: Informa no monitor serial que a sincronizacao esta sendo iniciada.
+55: Fecha a inicializacao.
 
-  char buffer[25];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeInfo);
-  return String(buffer);
-}
+LINHAS 57-95 - LEITURA E ENVIO HTTP
+57: Declara a funcao que le o sensor e transmite uma medicao.
+58: Le a umidade percentual do DHT22.
+59: Le a temperatura em Celsius.
+60: Linha em branco de separacao.
+61: Verifica se uma das leituras resultou em NaN, que indica falha de medicao.
+62: Exibe erro no monitor serial quando a leitura falhou.
+63: Sai da funcao sem enviar dados invalidos.
+64: Fecha a condicao de erro.
+65: Linha em branco que separa erro e envio.
+66: Reserva um buffer para o corpo JSON enviado ao servidor.
+67: Inicia a formatacao do JSON no buffer.
+68: Informa o destino do texto formatado.
+69: Informa o tamanho maximo do buffer para evitar escrita alem do espaco.
+70: Define os campos do JSON e os marcadores para identificador, horario,
+    temperatura e umidade.
+71: Fornece o identificador do sensor para o primeiro marcador.
+72: Fornece o horario ISO para o segundo marcador.
+73: Fornece a temperatura para o terceiro marcador.
+74: Fornece a umidade para o quarto marcador.
+75: Fecha a chamada de formatacao.
+76: Linha em branco de separacao.
+77: Cria um cliente HTTP para realizar a requisicao.
+78: Monta o endereco completo do endpoint /readings no servidor.
+79: Abre a conexao HTTP para esse endereco.
+80: Informa que o corpo enviado tem formato JSON.
+81: Verifica se foi configurada uma chave nao vazia.
+82: Se houver chave, inclui-a no cabecalho esperado pelo servidor.
+83: Fecha a verificacao da chave.
+84: Linha em branco de separacao.
+85: Envia o JSON em uma requisicao POST e armazena o codigo ou erro retornado.
+86: Comeca a imprimir resumo da leitura e o resultado HTTP.
+87: Fornece identificador, temperatura, umidade e codigo para a mensagem.
+88: Linha em branco de separacao.
+89: Verifica se o codigo negativo indica falha de comunicacao.
+90: Imprime a descricao do erro de rede/HTTP.
+91: Se a requisicao teve resposta, verifica se o status ficou fora da faixa 2xx.
+92: Imprime o corpo de erro enviado pelo servidor.
+93: Fecha as condicoes de erro HTTP.
+94: Encerra e libera os recursos do cliente HTTP.
+95: Fecha a funcao de envio.
 
-void setup() {
-  Serial.begin(115200);
-  dht.begin();
-  connectWiFi();
-
-  configTzTime("UTC0", "pool.ntp.org", "time.nist.gov");
-  Serial.println("Sincronizando horario...");
-}
-
-void sendReading() {
-  float humidity = dht.readHumidity();
-  float temperature = dht.readTemperature();
-
-  if (isnan(humidity) || isnan(temperature)) {
-    Serial.println("Falha na leitura do DHT22");
-    return;
-  }
-
-  char payload[512];
-  snprintf(
-    payload,
-    sizeof(payload),
-    "{\"sensor_id\":\"%s\",\"timestamp\":\"%s\",\"temperature_c\":%.2f,\"humidity_percent\":%.2f}",
-    SENSOR_ID,
-    isoTimestamp().c_str(),
-    temperature,
-    humidity
-  );
-
-  HTTPClient http;
-  String url = String("http://") + SERVER_HOST + ":" + SERVER_PORT + "/readings";
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  if (strlen(API_KEY) > 0) {
-    http.addHeader("X-API-Key", API_KEY);
-  }
-
-  int statusCode = http.POST((uint8_t *)payload, strlen(payload));
-  Serial.printf("Sensor=%s temperatura=%.1f C umidade=%.1f%% HTTP=%d\n",
-                SENSOR_ID, temperature, humidity, statusCode);
-
-  if (statusCode < 0) {
-    Serial.println(http.errorToString(statusCode));
-  } else if (statusCode < 200 || statusCode >= 300) {
-    Serial.println(http.getString());
-  }
-  http.end();
-}
-
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-  }
-
-  static unsigned long lastSend = 0;
-  unsigned long now = millis();
-  if (now - lastSend >= SEND_INTERVAL_MS) {
-    lastSend = now;
-    sendReading();
-  }
-
-  delay(100);
-}
+LINHAS 97-110 - CICLO PRINCIPAL
+97: Declara loop, executado repetidamente enquanto a placa estiver ligada.
+98: Confere se a conexao Wi-Fi foi perdida.
+99: Tenta conectar novamente se estiver desconectado.
+100: Fecha a condicao de reconexao.
+101: Linha em branco de separacao.
+102: Cria um marcador persistente entre iteracoes para o instante do ultimo envio.
+103: Le o contador de milissegundos desde que a placa iniciou.
+104: Verifica se transcorreram pelo menos 30 segundos desde o ultimo envio.
+105: Atualiza o instante do envio antes de iniciar uma nova leitura.
+106: Chama a rotina que le o DHT22 e envia o resultado.
+107: Fecha a condicao do intervalo.
+108: Linha em branco de separacao.
+109: Aguarda 100 milissegundos para reduzir o uso continuo do processador.
+110: Fecha o ciclo principal.
