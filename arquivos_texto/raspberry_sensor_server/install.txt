@@ -1,28 +1,52 @@
-#!/usr/bin/env bash
-set -euo pipefail
+EXPLICACAO LINHA POR LINHA: raspberry_sensor_server/install.sh
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVICE_NAME="raspberry-sensor-server"
-SERVICE_USER="${SUDO_USER:-$USER}"
+Este script registra o servidor Python como um servico do systemd no Raspberry
+Pi. Assim, ele pode iniciar automaticamente com o sistema e ser reiniciado se
+parar inesperadamente.
 
-sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null <<EOF
-[Unit]
-Description=Servidor HTTP de sensores ESP32
-After=network-online.target
-Wants=network-online.target
+As referencias usam os numeros de linha do script original. Todas as linhas
+com comandos ou configuracoes estao explicadas. Linhas em branco apenas
+separam blocos e nao executam comandos.
 
-[Service]
-Type=simple
-User=${SERVICE_USER}
-WorkingDirectory=${SCRIPT_DIR}
-ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/server.py
-Restart=always
-RestartSec=5
+LINHAS 1-6 - PREPARACAO
+1: Indica que o script deve ser executado pelo Bash; permite inicia-lo como
+   programa de shell.
+2: Ativa modo estrito: encerra em erros, variaveis nao definidas e falhas em
+   comandos dentro de pipelines; evita instalacao parcialmente silenciosa.
+3: Linha em branco para separar configuracao do restante.
+4: Descobre o caminho absoluto da pasta do script, independente da pasta atual.
+   Isso permite que o servico encontre server.py mesmo se iniciado por outro
+   diretorio.
+5: Define o nome usado para o arquivo e os comandos do servico systemd.
+6: Escolhe o usuario normal que chamou sudo; se nao houver, usa o usuario atual.
+   Executar o servidor como usuario normal reduz a necessidade de privilegios.
+7: Linha em branco de separacao.
 
-[Install]
-WantedBy=multi-user.target
-EOF
+LINHAS 8-24 - CRIACAO DO SERVICO SYSTEMD
+8: Usa sudo tee para gravar como administrador a configuracao do servico;
+   /dev/null descarta a copia que tee normalmente mostraria no terminal.
+9: Inicia a secao de metadados do servico systemd.
+10: Define uma descricao legivel para ferramentas de administracao.
+11: Pede que o servico seja iniciado depois de a rede estar disponivel.
+12: Solicita que a unidade de rede seja iniciada como dependencia.
+13: Linha em branco de separacao dentro do arquivo systemd.
+14: Inicia as configuracoes de execucao do servico.
+15: Informa que o servico e um processo simples de longa duracao.
+16: Define o usuario que executara o servidor.
+17: Define como pasta de trabalho a pasta onde estao os arquivos do servidor.
+18: Informa ao systemd para iniciar server.py com Python 3.
+19: Configura reinicio automatico sempre que o processo terminar.
+20: Aguarda cinco segundos antes de tentar reiniciar, evitando tentativas
+    repetidas sem intervalo.
+21: Linha em branco de separacao dentro do arquivo systemd.
+22: Inicia as configuracoes de instalacao/habilitacao.
+23: Faz o servico iniciar no modo multiusuario, normalmente durante a
+    inicializacao do Raspberry Pi.
+24: Finaliza o conteudo entregue a tee.
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now "${SERVICE_NAME}.service"
-sudo systemctl status "${SERVICE_NAME}.service" --no-pager
+LINHAS 25-28 - ATIVACAO E VERIFICACAO
+25: Linha em branco que separa a gravacao do arquivo dos comandos systemd.
+26: Pede ao systemd para reler os arquivos de configuracao, incluindo o novo.
+27: Habilita o servico para inicializacao futura e inicia-o imediatamente.
+28: Mostra o estado do servico sem abrir um paginador interativo; confirma se
+    ele iniciou e facilita diagnosticar falhas.

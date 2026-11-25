@@ -1,154 +1,186 @@
-#!/usr/bin/env bash
-set -euo pipefail
+EXPLICACAO LINHA POR LINHA: router/setup_router.sh
 
-if [[ $EUID -ne 0 ]]; then
-  echo "Execute como root: sudo bash setup_router.sh"
-  exit 1
-fi
+Este script configura o Raspberry Pi como ponto de acesso Wi-Fi e roteador para
+os ESP32. Ele instala e configura DHCP/DNS, ponto de acesso, encaminhamento de
+pacotes e NAT. E importante observar que altera configuracoes globais de rede,
+firewall e servicos do sistema; deve ser executado apenas no Raspberry Pi
+correto e com os nomes de interface adequados.
 
-if [[ -z "${SUDO_USER:-}" ]]; then
-  echo "Execute com sudo para preservar o usuario normal."
-  exit 1
-fi
+As referencias usam os numeros de linha do script original. Todas as linhas
+com comandos ou configuracoes estao explicadas. Linhas em branco separam
+blocos ou deixam espacos em arquivos de configuracao; nao executam comandos.
 
-read -r -p "Nome da rede Wi-Fi dos ESP32 [ESP32-Router]: " WIFI_SSID
-WIFI_SSID="${WIFI_SSID:-ESP32-Router}"
+LINHAS 1-12 - INTERPRETADOR E PRE-CONDICOES
+1: Indica que o script deve rodar no Bash.
+2: Ativa modo estrito para interromper em erros, variaveis ausentes e falhas em
+   pipelines; evita continuar com uma configuracao incompleta.
+3: Linha em branco para separar a preparacao.
+4: Verifica se o script foi executado como root; sem privilegios administrativos
+   nao seria possivel alterar a rede e os servicos.
+5: Mostra a forma esperada de execucao com sudo.
+6: Encerra com erro se nao houver privilegios de root.
+7: Fecha a verificacao de root.
+8: Linha em branco de separacao.
+9: Verifica se sudo informou qual usuario normal iniciou o comando.
+10: Explica que o script deve ser executado via sudo para identificar o usuario.
+11: Encerra se o usuario original nao puder ser identificado.
+12: Fecha essa verificacao.
 
-while true; do
-  read -r -p "Senha da rede Wi-Fi (minimo 8 caracteres): " WIFI_PASSWORD
-  if [[ ${#WIFI_PASSWORD} -ge 8 ]]; then
-    break
-  fi
-  echo "A senha deve ter pelo menos 8 caracteres."
-done
+LINHAS 14-38 - ENTRADAS E VALIDACAO DE INTERFACES
+14: Solicita o nome da rede Wi-Fi e propoe ESP32-Router como padrao.
+15: Usa o padrao se a entrada ficou vazia.
+16: Linha em branco de separacao.
+17: Inicia repeticao para solicitar uma senha valida.
+18: Solicita a senha da rede sem imprime-la como parte da mensagem.
+19: Confere se a senha tem pelo menos oito caracteres.
+20: Sai do loop quando a senha atende ao minimo.
+21: Fecha a condicao de validacao.
+22: Informa que a senha e curta demais.
+23: Fecha o loop; se a senha nao for valida, a solicitacao recomeca.
+24: Linha em branco de separacao.
+25: Solicita a interface Wi-Fi interna, usada para conectar os ESP32.
+26: Usa wlan0 como padrao se nenhuma interface for informada.
+27: Linha em branco de separacao.
+28: Solicita a interface Ethernet externa, que fornece a conexao de saida.
+29: Usa eth0 como padrao.
+30: Linha em branco de separacao.
+31: Inicia um loop para verificar as duas interfaces escolhidas.
+32: Usa ip link show para confirmar que a interface existe; redireciona a saida
+    para evitar mensagens de rotina.
+33: Informa qual interface nao foi encontrada.
+34: Anuncia que mostrara as interfaces disponiveis.
+35: Lista interfaces de rede em formato resumido para ajudar a correcao.
+36: Interrompe a configuracao se uma interface nao existir.
+37: Fecha o bloco condicional.
+38: Fecha o loop de validacao.
 
-read -r -p "Interface Wi-Fi interna [wlan0]: " WIFI_IFACE
-WIFI_IFACE="${WIFI_IFACE:-wlan0}"
+LINHAS 40-68 - DEPENDENCIAS, DHCP/DNS E PONTO DE ACESSO
+40: Atualiza os indices de pacotes do sistema.
+41: Instala hostapd, dnsmasq e nftables sem perguntas interativas; sao usados,
+    respectivamente, para Wi-Fi, DHCP/DNS e firewall/NAT.
+42: Linha em branco de separacao.
+43: Cria a pasta de configuracao adicional do dnsmasq caso ainda nao exista.
+44: Linha em branco de separacao.
+45: Comeca a gravar a configuracao do dnsmasq, substituindo variaveis pelo
+    nome da interface escolhida.
+46: Vincula o DHCP/DNS a interface Wi-Fi interna.
+47: Faz o dnsmasq usar somente as interfaces indicadas, evitando escutar em
+    interfaces nao planejadas.
+48: Define a faixa de IPs distribuida aos ESP32 e a validade de 24 horas.
+49: Anuncia 192.168.50.1 como gateway dos clientes Wi-Fi.
+50: Anuncia 192.168.50.1 como servidor DNS dos clientes.
+51: Evita encaminhar nomes de dominio incompletos para DNS externo.
+52: Evita encaminhar consultas de enderecos privados incorretos.
+53: Trata o dominio local lan como rede local.
+54: Fecha o arquivo de configuracao do dnsmasq.
+55: Linha em branco de separacao.
+56: Comeca a gravar a configuracao do hostapd, que cria o ponto de acesso.
+57: Seleciona a interface Wi-Fi interna.
+58: Define o driver Linux nl80211 para controlar o radio Wi-Fi.
+59: Define o nome da rede solicitado.
+60: Seleciona o modo Wi-Fi g de 2,4 GHz.
+61: Escolhe o canal Wi-Fi 6.
+62: Habilita WMM, recurso de qualidade de servico Wi-Fi.
+63: Permite o metodo de autenticacao usado pela rede configurada.
+64: Habilita WPA2.
+65: Define autenticacao por chave compartilhada.
+66: Define CCMP como cifra de protecao do trafego Wi-Fi.
+67: Fornece a senha informada pelo operador ao hostapd.
+68: Fecha o arquivo de configuracao do ponto de acesso.
 
-read -r -p "Interface Ethernet externa [eth0]: " WAN_IFACE
-WAN_IFACE="${WAN_IFACE:-eth0}"
+LINHAS 70-79 - ATIVACAO DA INTERFACE WI-FI
+70-71: Altera /etc/default/hostapd para apontar para o arquivo criado; o
+       comando continua na linha 71 por causa da barra invertida.
+72: Linha em branco de separacao.
+73: Confere se NetworkManager (nmcli) esta instalado.
+74: Se existir, informa ao NetworkManager para nao gerenciar a interface,
+    deixando o hostapd controla-la. O || true evita interromper o script caso
+    essa alteracao falhe.
+75: Fecha a condicao de disponibilidade do nmcli.
+76: Linha em branco de separacao.
+77: Remove enderecos IP atuais da interface Wi-Fi para evitar conflitos.
+78: Atribui ao Raspberry o endereco 192.168.50.1/24, que sera gateway local.
+79: Ativa a interface Wi-Fi.
 
-for iface in "$WIFI_IFACE" "$WAN_IFACE"; do
-  if ! ip link show "$iface" >/dev/null 2>&1; then
-    echo "Erro: interface '$iface' nao encontrada."
-    echo "Interfaces disponiveis:"
-    ip -br link
-    exit 1
-  fi
-done
+LINHAS 81-105 - FIREWALL E NAT
+81: Inicia a gravacao das regras do nftables.
+82: Remove o conjunto de regras atual; isso substitui regras existentes e e uma
+    mudanca importante no firewall do sistema.
+83: Linha em branco dentro do arquivo de regras.
+84: Declara uma tabela de filtragem IPv4/IPv6.
+85: Declara a cadeia de entrada de pacotes destinados ao Raspberry.
+86: Liga a cadeia ao processamento de entrada e aceita pacotes por padrao.
+87: Fecha a cadeia de entrada.
+88: Linha em branco dentro do arquivo de regras.
+89: Declara a cadeia de encaminhamento entre interfaces.
+90: Aceita encaminhamentos por padrao.
+91: Linha em branco dentro da cadeia.
+92: Permite trafego de conexoes ja estabelecidas ou relacionadas.
+93: Permite encaminhar trafego que entra pelo Wi-Fi para a interface externa.
+94: Fecha a cadeia de encaminhamento.
+95: Fecha a tabela de filtragem.
+96: Linha em branco de separacao no arquivo de regras.
+97: Declara tabela NAT para IPv4.
+98: Declara a cadeia aplicada depois do roteamento.
+99: Configura a cadeia de NAT de saida.
+100: Aplica masquerade ao trafego que sai pela interface externa para que os
+     clientes Wi-Fi compartilhem a conexao do Raspberry.
+101: Fecha a cadeia NAT.
+102: Fecha a tabela NAT.
+103: Fecha o arquivo de regras.
+104: Linha em branco de separacao.
+105: Carrega imediatamente as regras gravadas; um erro aqui interrompe o script.
 
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y hostapd dnsmasq nftables
+LINHAS 107-112 - ENCAMINHAMENTO IP
+107: Comeca a gravar configuracoes persistentes do kernel.
+108: Habilita encaminhamento IPv4, necessario para rotear pacotes dos ESP32.
+109: Desabilita encaminhamento IPv6 global neste arranjo.
+110: Fecha o arquivo sysctl.
+111: Linha em branco de separacao.
+112: Aplica configuracoes sysctl do sistema sem mostrar a saida normal.
 
-mkdir -p /etc/dnsmasq.d
+LINHAS 114-141 - SERVICO DE CONFIGURACAO E SERVICOS DE REDE
+114: Comeca a criar um servico systemd para reconfigurar o IP Wi-Fi durante a
+     inicializacao.
+115: Abre a secao de metadados do servico.
+116: Descreve a funcao do servico para administradores.
+117: Agenda-o depois da preparacao inicial de rede.
+118: Agenda-o antes de hostapd e dnsmasq, que dependem do IP configurado.
+119: Linha em branco no arquivo systemd.
+120: Abre a secao de execucao do servico.
+121: Define o servico como tarefa unica, nao como processo permanente.
+122: Remove enderecos antigos da interface durante a inicializacao.
+123: Reatribui o endereco gateway 192.168.50.1/24.
+124: Ativa a interface Wi-Fi.
+125: Mantem o servico marcado como ativo depois da execucao bem-sucedida.
+126: Linha em branco no arquivo systemd.
+127: Abre a secao para habilitar o servico no sistema.
+128: Faz o servico participar da inicializacao multiusuario.
+129: Fecha a configuracao escrita para o systemd.
+130: Linha em branco de separacao.
+131: Atualiza a lista de unidades do systemd.
+132: Habilita o servico que configura o IP para inicializacoes futuras.
+133: Linha em branco de separacao.
+134: Remove o bloqueio que pode impedir hostapd de iniciar em algumas
+     distribuicoes.
+135: Habilita nftables durante a inicializacao.
+136: Habilita dnsmasq durante a inicializacao.
+137: Habilita hostapd durante a inicializacao.
+138: Linha em branco de separacao.
+139: Reinicia dnsmasq para aplicar o DHCP/DNS.
+140: Reinicia nftables para ativar as regras de firewall e NAT.
+141: Reinicia hostapd para iniciar a rede Wi-Fi.
 
-cat >/etc/dnsmasq.d/esp32-router.conf <<EOF
-interface=${WIFI_IFACE}
-bind-interfaces
-dhcp-range=192.168.50.20,192.168.50.200,255.255.255.0,24h
-dhcp-option=3,192.168.50.1
-dhcp-option=6,192.168.50.1
-domain-needed
-bogus-priv
-local=/lan/
-EOF
-
-cat >/etc/hostapd/hostapd.conf <<EOF
-interface=${WIFI_IFACE}
-driver=nl80211
-ssid=${WIFI_SSID}
-hw_mode=g
-channel=6
-wmm_enabled=1
-auth_algs=1
-wpa=2
-wpa_key_mgmt=WPA-PSK
-rsn_pairwise=CCMP
-wpa_passphrase=${WIFI_PASSWORD}
-EOF
-
-sed -i 's|^#*DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' \
-  /etc/default/hostapd
-
-if command -v nmcli >/dev/null 2>&1; then
-  nmcli device set "$WIFI_IFACE" managed no || true
-fi
-
-ip addr flush dev "$WIFI_IFACE"
-ip addr add 192.168.50.1/24 dev "$WIFI_IFACE"
-ip link set "$WIFI_IFACE" up
-
-cat >/etc/nftables.conf <<EOF
-flush ruleset
-
-table inet filter {
-  chain input {
-    type filter hook input priority 0; policy accept;
-  }
-
-  chain forward {
-    type filter hook forward priority 0; policy accept;
-
-    ct state established,related accept
-    iifname "${WIFI_IFACE}" oifname "${WAN_IFACE}" accept
-  }
-}
-
-table ip nat {
-  chain postrouting {
-    type nat hook postrouting priority 100; policy accept;
-    oifname "${WAN_IFACE}" masquerade
-  }
-}
-EOF
-
-nft -f /etc/nftables.conf
-
-cat >/etc/sysctl.d/99-esp32-router.conf <<EOF
-net.ipv4.ip_forward=1
-net.ipv6.conf.all.forwarding=0
-EOF
-
-sysctl --system >/dev/null
-
-cat >/etc/systemd/system/esp32-router-ip.service <<EOF
-[Unit]
-Description=Configurar rede interna do Raspberry Pi para ESP32
-After=network-pre.target
-Before=hostapd.service dnsmasq.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/ip address flush dev ${WIFI_IFACE}
-ExecStart=/usr/sbin/ip address add 192.168.50.1/24 dev ${WIFI_IFACE}
-ExecStart=/usr/sbin/ip link set ${WIFI_IFACE} up
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable esp32-router-ip.service
-
-systemctl unmask hostapd
-systemctl enable nftables
-systemctl enable dnsmasq
-systemctl enable hostapd
-
-systemctl restart dnsmasq
-systemctl restart nftables
-systemctl restart hostapd
-
-echo
-echo "Configuracao concluida."
-echo "Rede Wi-Fi: ${WIFI_SSID}"
-echo "Faixa de IP: 192.168.50.20 a 192.168.50.200"
-echo "Gateway/DNS do ESP32: 192.168.50.1"
-echo "Interface interna: ${WIFI_IFACE}"
-echo "Interface Internet: ${WAN_IFACE}"
-echo
-echo "Verifique:"
-echo "  sudo systemctl status hostapd"
-echo "  sudo systemctl status dnsmasq"
-echo "  journalctl -u hostapd -n 30"
+LINHAS 143-154 - RESUMO E DIAGNOSTICO
+143: Imprime uma linha em branco para separar o resumo.
+144: Informa que a configuracao terminou.
+145: Mostra o nome da rede Wi-Fi configurada.
+146: Mostra a faixa de enderecos que os ESP32 podem receber.
+147: Mostra o endereco usado como gateway e DNS pelos ESP32.
+148: Mostra a interface interna escolhida.
+149: Mostra a interface que leva a rede externa/Internet.
+150: Imprime uma linha em branco.
+151: Anuncia comandos de verificacao.
+152: Sugere consultar o estado do hostapd.
+153: Sugere consultar o estado do dnsmasq.
+154: Sugere consultar mensagens recentes do hostapd no journal.
