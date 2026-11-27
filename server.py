@@ -59,6 +59,7 @@ def get_sensor_status():
             "last_received": last_received,
             "seconds_without_data": seconds_without_data,
         }
+     return statuses
 
 def monitor_sensors():
     previous = {}
