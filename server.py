@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 import json
 import os
@@ -59,7 +58,7 @@ def get_sensor_status():
             "last_received": last_received,
             "seconds_without_data": seconds_without_data,
         }
-     return statuses
+    return statuses
 
 def monitor_sensors():
     previous = {}
